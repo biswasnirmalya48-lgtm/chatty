@@ -1,34 +1,59 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { supabase } from './supabase'
+
+// ── Separate ChatInput to prevent re-render focus loss ──
+function ChatInput({ onSend, onImage }) {
+  const [text, setText] = useState('')
+  const inputRef = useRef(null)
+  const fileRef = useRef(null)
+
+  function send() {
+    if (!text.trim()) return
+    onSend(text.trim())
+    setText('')
+    inputRef.current?.focus()
+  }
+
+  return (
+    <div style={{ display: 'flex', gap: 8, padding: '10px 12px', borderTop: '1px solid #E5E5EA', alignItems: 'center', background: 'inherit' }}>
+      <button onClick={() => fileRef.current.click()} style={{ width: 34, height: 34, borderRadius: '50%', border: 'none', background: 'transparent', fontSize: 20, cursor: 'pointer', flexShrink: 0 }}>🖼️</button>
+      <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => { if (e.target.files[0]) { onImage(e.target.files[0]); e.target.value = '' } }} />
+      <input
+        ref={inputRef}
+        autoFocus
+        placeholder="মেসেজ লেখো..."
+        value={text}
+        onChange={e => setText(e.target.value)}
+        onKeyDown={e => e.key === 'Enter' && send()}
+        style={{ flex: 1, padding: '10px 14px', borderRadius: 20, border: '1px solid #E5E5EA', background: '#F2F2F7', fontSize: 14, outline: 'none', boxSizing: 'border-box' }}
+      />
+      <button onClick={send} style={{ width: 38, height: 38, borderRadius: '50%', border: 'none', background: '#007AFF', color: '#fff', fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>↑</button>
+    </div>
+  )
+}
 
 export default function App() {
   const [session, setSession] = useState(null)
   const [loading, setLoading] = useState(true)
   const [profile, setProfile] = useState(null)
-  const [stage, setStage] = useState('login') // login | setupProfile | app
+  const [stage, setStage] = useState('login')
   const [dark, setDark] = useState(false)
-
-  // app screens
-  const [screen, setScreen] = useState('chats') // chats | newgroup | chat | friends
+  const [screen, setScreen] = useState('chats')
   const [allProfiles, setAllProfiles] = useState([])
   const [friends, setFriends] = useState([])
   const [groups, setGroups] = useState([])
   const [currentChat, setCurrentChat] = useState(null)
   const [messages, setMessages] = useState([])
-  const [msgText, setMsgText] = useState('')
   const [notifications, setNotifications] = useState([])
   const [showNotifs, setShowNotifs] = useState(false)
-
-  // login form
   const [mode, setMode] = useState('login')
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [authError, setAuthError] = useState('')
+  const [pName, setPName] = useState('')
 
   const photoInputRef = useRef(null)
-  const avatarInputRef = useRef(null)
-  const imageInputRef = useRef(null)
   const msgEndRef = useRef(null)
 
   const t = dark ? {
@@ -41,7 +66,23 @@ export default function App() {
     them: '#E9E9EB', input: '#F2F2F7'
   }
 
-  // ─── Auth ───────────────────────────────────────────────
+  const S = {
+    wrap: { width: '100%', maxWidth: 430, margin: '0 auto', background: t.bg, color: t.text, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif', minHeight: '100vh', display: 'flex', flexDirection: 'column' },
+    input: { width: '100%', padding: '12px 14px', borderRadius: 10, border: `1px solid ${t.border}`, background: t.input, color: t.text, fontSize: 14, marginBottom: 10, outline: 'none', boxSizing: 'border-box' },
+    btnBlue: { width: '100%', padding: '13px 0', borderRadius: 12, border: 'none', background: t.accent, color: '#fff', fontSize: 15, fontWeight: 600, cursor: 'pointer' },
+    btnGhost: { width: '100%', padding: '13px 0', borderRadius: 12, border: 'none', background: 'transparent', color: t.accent, fontSize: 14, cursor: 'pointer', marginTop: 8 },
+    iconBtn: { width: 34, height: 34, borderRadius: '50%', border: 'none', background: 'transparent', color: t.text, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 },
+    row: { display: 'flex', alignItems: 'center', gap: 12, padding: '11px 16px', borderBottom: `1px solid ${t.border}`, cursor: 'pointer' },
+    topbar: { display: 'flex', alignItems: 'center', gap: 10, padding: '13px 16px', borderBottom: `1px solid ${t.border}` }
+  }
+
+  function Av({ name = '?', url, size = 40 }) {
+    const ini = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
+    if (url) return <img src={url} alt={name} style={{ width: size, height: size, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }} />
+    return <div style={{ width: size, height: size, borderRadius: '50%', background: t.accent, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 600, fontSize: size * 0.35, flexShrink: 0 }}>{ini}</div>
+  }
+
+  // ── Auth ──
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session)
@@ -54,21 +95,15 @@ export default function App() {
 
   async function fetchProfile(uid) {
     const { data } = await supabase.from('profiles').select('*').eq('id', uid).single()
-    if (data) {
-      setProfile(data)
-      setStage(data.name ? 'app' : 'setupProfile')
-    } else {
-      setStage('setupProfile')
-    }
+    if (data) { setProfile(data); setPName(data.name || ''); setStage(data.name ? 'app' : 'setupProfile') }
+    else setStage('setupProfile')
     setLoading(false)
   }
 
   async function handleSignup() {
     setAuthError('')
     if (!name || !email || !password) { setAuthError('সব ফিল্ড পূরণ করো'); return }
-    const { error } = await supabase.auth.signUp({
-      email, password, options: { data: { name } }
-    })
+    const { error } = await supabase.auth.signUp({ email, password, options: { data: { name } } })
     if (error) setAuthError(error.message)
   }
 
@@ -85,7 +120,6 @@ export default function App() {
     setSession(null); setProfile(null); setStage('login')
   }
 
-  // ─── Profile photo upload ────────────────────────────────
   async function uploadAvatar(file) {
     const path = `${session.user.id}/${Date.now()}_${file.name}`
     const { error: upErr } = await supabase.storage.from('chat-images').upload(path, file)
@@ -95,90 +129,68 @@ export default function App() {
     setProfile(p => ({ ...p, avatar_url: urlData.publicUrl }))
   }
 
-  async function saveProfileName(newName) {
-    await supabase.from('profiles').update({ name: newName }).eq('id', session.user.id)
-    setProfile(p => ({ ...p, name: newName }))
+  async function saveProfileName() {
+    if (!pName.trim()) return
+    await supabase.from('profiles').update({ name: pName.trim() }).eq('id', session.user.id)
+    setProfile(p => ({ ...p, name: pName.trim() }))
     setStage('app')
-    loadAppData()
   }
 
-  // ─── Load data ───────────────────────────────────────────
-  async function loadAppData() {
+  // ── Load data ──
+  const loadAppData = useCallback(async () => {
     if (!session) return
-    // set online
     await supabase.from('profiles').update({ online: true }).eq('id', session.user.id)
-    // all profiles except me
     const { data: profs } = await supabase.from('profiles').select('*').neq('id', session.user.id)
     setAllProfiles(profs || [])
-    // my friends
     const { data: fr } = await supabase.from('friends')
       .select('*, friend:profiles!friends_friend_id_fkey(*)')
       .eq('user_id', session.user.id).eq('status', 'accepted')
     setFriends(fr?.map(f => f.friend) || [])
-    // my chats (groups)
     const { data: memberships } = await supabase.from('chat_members')
       .select('chat_id, chats(*)').eq('user_id', session.user.id)
-    const groupChats = memberships?.filter(m => m.chats?.is_group).map(m => m.chats) || []
-    setGroups(groupChats)
+    setGroups(memberships?.filter(m => m.chats?.is_group).map(m => m.chats) || [])
+  }, [session])
+
+  useEffect(() => { if (stage === 'app' && session) loadAppData() }, [stage, session])
+
+  // ── Friends ──
+  async function addFriend(fp) {
+    if (friends.find(f => f.id === fp.id)) { alert('ইতিমধ্যে বন্ধু'); return }
+    await supabase.from('friends').insert({ user_id: session.user.id, friend_id: fp.id, status: 'accepted' })
+    await supabase.from('friends').insert({ user_id: fp.id, friend_id: session.user.id, status: 'accepted' })
+    setFriends(prev => [...prev, fp])
+    addNotif(`${fp.name} বন্ধু হয়েছে`)
   }
 
-  useEffect(() => {
-    if (stage === 'app' && session) loadAppData()
-  }, [stage, session])
-
-  // ─── Friends ─────────────────────────────────────────────
-  async function addFriend(friendProfile) {
-    // check already friends
-    const exists = friends.find(f => f.id === friendProfile.id)
-    if (exists) { alert('ইতিমধ্যে বন্ধু আছে'); return }
-    await supabase.from('friends').insert({ user_id: session.user.id, friend_id: friendProfile.id, status: 'accepted' })
-    await supabase.from('friends').insert({ user_id: friendProfile.id, friend_id: session.user.id, status: 'accepted' })
-    setFriends(prev => [...prev, friendProfile])
-    addNotif(`${friendProfile.name} বন্ধু হিসেবে যোগ হয়েছে`)
-  }
-
-  // ─── Groups ──────────────────────────────────────────────
+  // ── Groups ──
   async function createGroup(groupName, memberIds) {
-    const { data: chat } = await supabase.from('chats')
-      .insert({ is_group: true, name: groupName }).select().single()
-    const allMembers = [session.user.id, ...memberIds]
-    await supabase.from('chat_members').insert(allMembers.map(uid => ({ chat_id: chat.id, user_id: uid })))
-    await supabase.from('messages').insert({
-      chat_id: chat.id, sender_id: session.user.id, text: `"${groupName}" গ্রুপ তৈরি হয়েছে`
-    })
+    const { data: chat } = await supabase.from('chats').insert({ is_group: true, name: groupName }).select().single()
+    await supabase.from('chat_members').insert([session.user.id, ...memberIds].map(uid => ({ chat_id: chat.id, user_id: uid })))
+    await supabase.from('messages').insert({ chat_id: chat.id, sender_id: session.user.id, text: `"${groupName}" গ্রুপ তৈরি হয়েছে` })
     setGroups(prev => [...prev, chat])
     addNotif(`গ্রুপ "${groupName}" তৈরি হয়েছে`)
     setScreen('chats')
   }
 
-  // ─── Open chat ───────────────────────────────────────────
+  // ── Open chat ──
   async function openDirectChat(friend) {
-    // find or create 1:1 chat
-    const { data: myMemberships } = await supabase.from('chat_members')
-      .select('chat_id').eq('user_id', session.user.id)
-    const { data: theirMemberships } = await supabase.from('chat_members')
-      .select('chat_id').eq('user_id', friend.id)
-    const myChatIds = myMemberships?.map(m => m.chat_id) || []
-    const theirChatIds = theirMemberships?.map(m => m.chat_id) || []
-    const commonId = myChatIds.find(id => theirChatIds.includes(id))
-
-    let chatId
-    if (commonId) {
-      // check it's not a group
-      const { data: chatData } = await supabase.from('chats').select('*').eq('id', commonId).single()
-      if (chatData && !chatData.is_group) { chatId = commonId }
+    const { data: mine } = await supabase.from('chat_members').select('chat_id').eq('user_id', session.user.id)
+    const { data: theirs } = await supabase.from('chat_members').select('chat_id').eq('user_id', friend.id)
+    const mineIds = mine?.map(m => m.chat_id) || []
+    const theirIds = theirs?.map(m => m.chat_id) || []
+    let chatId = mineIds.find(id => theirIds.includes(id))
+    if (chatId) {
+      const { data: cd } = await supabase.from('chats').select('*').eq('id', chatId).single()
+      if (cd?.is_group) chatId = null
     }
-
     if (!chatId) {
-      const { data: newChat } = await supabase.from('chats')
-        .insert({ is_group: false, name: null }).select().single()
+      const { data: nc } = await supabase.from('chats').insert({ is_group: false }).select().single()
       await supabase.from('chat_members').insert([
-        { chat_id: newChat.id, user_id: session.user.id },
-        { chat_id: newChat.id, user_id: friend.id }
+        { chat_id: nc.id, user_id: session.user.id },
+        { chat_id: nc.id, user_id: friend.id }
       ])
-      chatId = newChat.id
+      chatId = nc.id
     }
-
     setCurrentChat({ id: chatId, name: friend.name, avatar_url: friend.avatar_url, isGroup: false, online: friend.online })
     loadMessages(chatId)
     setScreen('chat')
@@ -190,92 +202,54 @@ export default function App() {
     setScreen('chat')
   }
 
-  // ─── Messages ────────────────────────────────────────────
+  // ── Messages ──
   async function loadMessages(chatId) {
     const { data } = await supabase.from('messages')
       .select('*, sender:profiles!messages_sender_id_fkey(name, avatar_url)')
       .eq('chat_id', chatId).order('created_at', { ascending: true })
     setMessages(data || [])
-    // mark read
-    if (data) {
-      const unread = data.filter(m => m.sender_id !== session.user.id)
-      for (const m of unread) {
-        await supabase.from('message_reads').upsert({ message_id: m.id, user_id: session.user.id }).select()
-      }
-    }
   }
 
-  // Realtime subscription
   useEffect(() => {
     if (!currentChat) return
     const channel = supabase.channel(`chat-${currentChat.id}`)
-      .on('postgres_changes', {
-        event: 'INSERT', schema: 'public', table: 'messages',
-        filter: `chat_id=eq.${currentChat.id}`
-      }, async payload => {
-        const { data: full } = await supabase.from('messages')
-          .select('*, sender:profiles!messages_sender_id_fkey(name, avatar_url)')
-          .eq('id', payload.new.id).single()
-        setMessages(prev => [...prev, full])
-        if (full.sender_id !== session.user.id) {
-          addNotif(`${full.sender?.name}: ${full.text || '📷 Photo'}`)
-          await supabase.from('message_reads').upsert({ message_id: full.id, user_id: session.user.id })
-        }
-      }).subscribe()
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `chat_id=eq.${currentChat.id}` },
+        async payload => {
+          const { data: full } = await supabase.from('messages')
+            .select('*, sender:profiles!messages_sender_id_fkey(name, avatar_url)')
+            .eq('id', payload.new.id).single()
+          if (full) {
+            setMessages(prev => [...prev, full])
+            if (full.sender_id !== session.user.id) addNotif(`${full.sender?.name}: ${full.text || '📷 Photo'}`)
+          }
+        }).subscribe()
     return () => supabase.removeChannel(channel)
   }, [currentChat])
 
-  useEffect(() => {
-    msgEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+  useEffect(() => { msgEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
 
-  async function sendMessage() {
-    if (!msgText.trim() || !currentChat) return
-    await supabase.from('messages').insert({
-      chat_id: currentChat.id, sender_id: session.user.id, text: msgText.trim()
-    })
-    setMsgText('')
-  }
+  const sendMessage = useCallback(async (text) => {
+    if (!currentChat) return
+    await supabase.from('messages').insert({ chat_id: currentChat.id, sender_id: session.user.id, text })
+  }, [currentChat, session])
 
-  async function sendImage(file) {
+  const sendImage = useCallback(async (file) => {
+    if (!currentChat) return
     const path = `messages/${currentChat.id}/${Date.now()}_${file.name}`
     const { error } = await supabase.storage.from('chat-images').upload(path, file)
     if (error) { alert('Image upload failed'); return }
     const { data: urlData } = supabase.storage.from('chat-images').getPublicUrl(path)
-    await supabase.from('messages').insert({
-      chat_id: currentChat.id, sender_id: session.user.id, image_url: urlData.publicUrl
-    })
-  }
+    await supabase.from('messages').insert({ chat_id: currentChat.id, sender_id: session.user.id, image_url: urlData.publicUrl })
+  }, [currentChat, session])
 
   function addNotif(text) {
     setNotifications(prev => [{ id: Date.now(), text }, ...prev].slice(0, 15))
   }
 
-  // ─── Shared styles ───────────────────────────────────────
-  const S = {
-    wrap: { width: '100%', maxWidth: 430, margin: '0 auto', background: t.bg, color: t.text, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif', minHeight: '100vh', display: 'flex', flexDirection: 'column' },
-    input: { width: '100%', padding: '12px 14px', borderRadius: 10, border: `1px solid ${t.border}`, background: t.input, color: t.text, fontSize: 14, marginBottom: 10, outline: 'none', boxSizing: 'border-box' },
-    btnBlue: { width: '100%', padding: '13px 0', borderRadius: 12, border: 'none', background: t.accent, color: '#fff', fontSize: 15, fontWeight: 600, cursor: 'pointer' },
-    btnGhost: { width: '100%', padding: '13px 0', borderRadius: 12, border: 'none', background: 'transparent', color: t.accent, fontSize: 14, cursor: 'pointer', marginTop: 8 },
-    iconBtn: { width: 34, height: 34, borderRadius: '50%', border: 'none', background: 'transparent', color: t.text, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 },
-    row: { display: 'flex', alignItems: 'center', gap: 12, padding: '11px 16px', borderBottom: `1px solid ${t.border}`, cursor: 'pointer' },
-    topbar: { display: 'flex', alignItems: 'center', gap: 10, padding: '13px 16px', borderBottom: `1px solid ${t.border}` }
-  }
+  // ── Loading ──
+  if (loading) return <div style={{ ...S.wrap, justifyContent: 'center', alignItems: 'center' }}><p style={{ color: t.sub }}>লোড হচ্ছে...</p></div>
 
-  function Av({ name = '?', url, size = 40, color = t.accent }) {
-    const ini = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
-    if (url) return <img src={url} alt={name} style={{ width: size, height: size, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }} />
-    return <div style={{ width: size, height: size, borderRadius: '50%', background: color, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 600, fontSize: size * 0.35, flexShrink: 0 }}>{ini}</div>
-  }
-
-  // ─── Loading ─────────────────────────────────────────────
-  if (loading) return (
-    <div style={{ ...S.wrap, justifyContent: 'center', alignItems: 'center' }}>
-      <p style={{ color: t.sub }}>লোড হচ্ছে...</p>
-    </div>
-  )
-
-  // ─── Login / Signup ──────────────────────────────────────
+  // ── Login ──
   if (stage === 'login') return (
     <div style={{ ...S.wrap, justifyContent: 'center', alignItems: 'center', padding: 32 }}>
       <div style={{ width: 72, height: 72, borderRadius: 22, background: t.accent, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
@@ -294,26 +268,21 @@ export default function App() {
     </div>
   )
 
-  // ─── Setup Profile ───────────────────────────────────────
-  if (stage === 'setupProfile') {
-    const [pName, setPName] = useState(profile?.name || name || '')
-    return (
-      <div style={{ ...S.wrap, justifyContent: 'center', alignItems: 'center', padding: 32 }}>
-        <h2 style={{ fontSize: 22, fontWeight: 600, marginBottom: 24 }}>প্রোফাইল সেটআপ</h2>
-        <div onClick={() => photoInputRef.current.click()} style={{ width: 110, height: 110, borderRadius: '50%', background: t.card, border: `2px dashed ${t.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', marginBottom: 20, overflow: 'hidden', position: 'relative' }}>
-          {profile?.avatar_url ? <img src={profile.avatar_url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ fontSize: 40 }}>📷</span>}
-        </div>
-        <input ref={photoInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => { if (e.target.files[0]) uploadAvatar(e.target.files[0]) }} />
-        <p style={{ color: t.sub, fontSize: 13, marginBottom: 20 }}>ছবিতে ট্যাপ করো আপলোড করতে</p>
-        <input placeholder="তোমার নাম" value={pName} onChange={e => setPName(e.target.value)} style={S.input} />
-        <button onClick={() => pName.trim() && saveProfileName(pName.trim())} style={{ ...S.btnBlue, opacity: pName.trim() ? 1 : 0.4 }}>শুরু করো</button>
+  // ── Setup Profile ──
+  if (stage === 'setupProfile') return (
+    <div style={{ ...S.wrap, justifyContent: 'center', alignItems: 'center', padding: 32 }}>
+      <h2 style={{ fontSize: 22, fontWeight: 600, marginBottom: 24 }}>প্রোফাইল সেটআপ</h2>
+      <div onClick={() => photoInputRef.current.click()} style={{ width: 110, height: 110, borderRadius: '50%', background: t.card, border: `2px dashed ${t.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', marginBottom: 20, overflow: 'hidden' }}>
+        {profile?.avatar_url ? <img src={profile.avatar_url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ fontSize: 40 }}>📷</span>}
       </div>
-    )
-  }
+      <input ref={photoInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => { if (e.target.files[0]) uploadAvatar(e.target.files[0]) }} />
+      <p style={{ color: t.sub, fontSize: 13, marginBottom: 20 }}>ছবিতে ট্যাপ করো আপলোড করতে</p>
+      <input placeholder="তোমার নাম" value={pName} onChange={e => setPName(e.target.value)} style={S.input} />
+      <button onClick={saveProfileName} style={{ ...S.btnBlue, opacity: pName.trim() ? 1 : 0.4 }}>শুরু করো</button>
+    </div>
+  )
 
-  // ─── Main App ────────────────────────────────────────────
-
-  // Friends screen
+  // ── Friends Screen ──
   function FriendsScreen() {
     const [query, setQuery] = useState('')
     const filtered = allProfiles.filter(p => p.name?.toLowerCase().includes(query.toLowerCase()))
@@ -343,13 +312,13 @@ export default function App() {
               </div>
             )
           })}
-          {filtered.length === 0 && <p style={{ textAlign: 'center', color: t.sub, marginTop: 40, fontSize: 14 }}>কেউ পাওয়া যায়নি</p>}
+          {filtered.length === 0 && <p style={{ textAlign: 'center', color: t.sub, marginTop: 40 }}>কেউ পাওয়া যায়নি</p>}
         </div>
       </div>
     )
   }
 
-  // New group screen
+  // ── New Group Screen ──
   function NewGroupScreen() {
     const [gName, setGName] = useState('')
     const [selected, setSelected] = useState([])
@@ -372,7 +341,7 @@ export default function App() {
               <span style={{ fontSize: 15 }}>{f.name}</span>
             </label>
           ))}
-          {friends.length === 0 && <p style={{ textAlign: 'center', color: t.sub, marginTop: 30, fontSize: 14 }}>আগে বন্ধু যোগ করো</p>}
+          {friends.length === 0 && <p style={{ textAlign: 'center', color: t.sub, marginTop: 30 }}>আগে বন্ধু যোগ করো</p>}
         </div>
         <div style={{ padding: 16 }}>
           <button onClick={() => gName.trim() && selected.length > 0 && createGroup(gName.trim(), selected)} style={{ ...S.btnBlue, opacity: gName.trim() && selected.length > 0 ? 1 : 0.4 }}>
@@ -383,7 +352,7 @@ export default function App() {
     )
   }
 
-  // Chats list
+  // ── Chats Screen ──
   function ChatsScreen() {
     return (
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
@@ -442,7 +411,7 @@ export default function App() {
     )
   }
 
-  // Chat screen
+  // ── Chat Screen ──
   function ChatScreen() {
     return (
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
@@ -461,23 +430,15 @@ export default function App() {
               {currentChat?.isGroup ? 'গ্রুপ' : (currentChat?.online ? 'অনলাইন' : 'অফলাইন')}
             </p>
           </div>
-          <button onClick={() => avatarInputRef.current.click()} style={S.iconBtn}>📷</button>
-          <input ref={avatarInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => { if (e.target.files[0]) uploadAvatar(e.target.files[0]) }} />
         </div>
-
         <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
           {messages.map((m, i) => {
             const mine = m.sender_id === session.user.id
             return (
               <div key={m.id || i} style={{ display: 'flex', flexDirection: 'column', alignItems: mine ? 'flex-end' : 'flex-start' }}>
-                {!mine && currentChat?.isGroup && (
-                  <p style={{ fontSize: 11, color: t.sub, marginBottom: 2, marginLeft: 4 }}>{m.sender?.name}</p>
-                )}
+                {!mine && currentChat?.isGroup && <p style={{ fontSize: 11, color: t.sub, marginBottom: 2, marginLeft: 4 }}>{m.sender?.name}</p>}
                 <div style={{ maxWidth: '75%', padding: m.image_url ? 4 : '9px 13px', borderRadius: 18, background: mine ? t.me : t.them, color: mine ? '#fff' : t.text, fontSize: 14 }}>
-                  {m.image_url
-                    ? <img src={m.image_url} alt="img" style={{ maxWidth: '100%', borderRadius: 14, display: 'block', maxHeight: 220 }} />
-                    : m.text
-                  }
+                  {m.image_url ? <img src={m.image_url} alt="img" style={{ maxWidth: '100%', borderRadius: 14, display: 'block', maxHeight: 220 }} /> : m.text}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 2 }}>
                   <span style={{ fontSize: 11, color: t.sub }}>{m.created_at ? new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</span>
@@ -488,19 +449,7 @@ export default function App() {
           })}
           <div ref={msgEndRef} />
         </div>
-
-        <div style={{ display: 'flex', gap: 8, padding: '10px 12px', borderTop: `1px solid ${t.border}`, alignItems: 'center' }}>
-          <button onClick={() => imageInputRef.current.click()} style={S.iconBtn}>🖼️</button>
-          <input ref={imageInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => { if (e.target.files[0]) { sendImage(e.target.files[0]); e.target.value = '' } }} />
-          <input
-            placeholder="মেসেজ লেখো..."
-            value={msgText}
-            onChange={e => setMsgText(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && sendMessage()}
-            style={{ ...S.input, margin: 0, flex: 1 }}
-          />
-          <button onClick={sendMessage} style={{ width: 40, height: 40, borderRadius: '50%', border: 'none', background: t.accent, color: '#fff', fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>↑</button>
-        </div>
+        <ChatInput onSend={sendMessage} onImage={sendImage} />
       </div>
     )
   }
